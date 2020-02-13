@@ -1,0 +1,10 @@
+[package]
+name = "quick_send"
+version = "0.1.0"
+authors = ["shockron22 <jake@mccoy.engineer>"]
+edition = "2018"
+
+[dependencies]
+openssl-sys = "0.9"
+openssl = "0.10"
+rust-crypto = "^0.2"
