@@ -1,12 +1,14 @@
 use openssl::symm::{Cipher, Mode, Crypter};
 use openssl::rand::rand_bytes;
-use crypto::pbkdf2::pbkdf2_simple;
-use crypto::sha2::Sha256;
-use crypto::hmac::Hmac;
-use std::io::{self, BufReader};
+use openssl::hash::hash;
+use openssl::hash::MessageDigest;
 use std::io::prelude::*;
 use std::fs::File;
 
+use ring::{pbkdf2};
+use std::{num::NonZeroU32};
+
+static PBKDF2_ALG: pbkdf2::Algorithm = pbkdf2::PBKDF2_HMAC_SHA256;
 static ONE_KB: u64 = 1024;
 
 fn main() {
@@ -21,26 +23,29 @@ fn main() {
 
     file.read_exact(&mut file_chunk_buf).unwrap();
 
-    let mut key = [0; 256];
-    let mut iv = [0; 256];
-    let mut salt = [0; 64];
-   // let mut pbkdf2_key = [0; 256];
-    rand_bytes(&mut key).unwrap();
+    let mut pbkdf2_key = [0; 32]; // 256 bits
+    let mut iv = [0; 16]; // 128 bits
+    let mut salt = [0; 8]; // 64 bits
     rand_bytes(&mut iv).unwrap();
     rand_bytes(&mut salt).unwrap();
+    rand_bytes(&mut pbkdf2_key).unwrap();
 
-    let mut mac = Hmac::new(Sha256::new(), "password".as_bytes());
+    println!("{:x?}", salt.iter());
+    println!("{:x?}", pbkdf2_key.iter());
+    println!("{:x?}", iv.iter());
 
-    //pbkdf2(&mut mac, &salt, 1, &mut pbkdf2_key);
+    let iterations = NonZeroU32::new(1).unwrap();
 
-
-
-    let pbkdf2_key = pbkdf2_simple("password", 2048).unwrap();
-    println!("{:?}", pbkdf2_key.as_bytes());
+    pbkdf2::derive(PBKDF2_ALG, iterations,  &salt, "password".as_bytes(), &mut pbkdf2_key);
 
    // let plaintexts: [&[u8]; 2] = [b"Some Stream of", b" Crypto Text"];
-    let key = b"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0A\x0B\x0C\x0D\x0E\x0F";
-    let iv = b"\x00\x01\x02\x03\x04\x05\x06\x07\x00\x01\x02\x03\x04\x05\x06\x07";
+   // let key = b"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0A\x0B\x0C\x0D\x0E\x0F";
+   // let iv = b"\x00\x01\x02\x03\x04\x05\x06\x07\x00\x01\x02\x03\x04\x05\x06\x07";
+  let key = b"\x4F\x61\x09\x9E\xC1\xD8\x22\x75\x1F\x1B\x4B\x03\x79\x05\x24\x10\xCE\xE1\x8F\x74\x81\x15\x0F\x18\x0D\x73\x10\x5C\x13\x2F\xB1\xD3";
+  let iv = b"\x78\x54\xF6\x1F\xBC\x2E\xF1\xAA\xA5\x9A\x32\x01\x34\x8B\x2E\x7E";
+  let salt = b"\x8B\x8C\xD9\xD4\xBD\xC8\x0D\xD0";
+  let magic_header = ["Salted__".as_bytes(), salt].concat();
+
    // let data_len = plaintexts.iter().fold(0, |sum, x| sum + x.len());
 
    // let file = File::open("test.txt").unwrap();
@@ -50,7 +55,7 @@ fn main() {
     let mut encrypter = Crypter::new(
         Cipher::aes_256_cbc(),
         Mode::Encrypt,
-        pbkdf2_key.as_bytes(),
+        key,
         Some(iv)).unwrap();
 
     let block_size = Cipher::aes_256_cbc().block_size();
@@ -63,6 +68,7 @@ fn main() {
     ciphertext.truncate(count);
 
      let mut out_file = File::create("out.enc").unwrap();
+     out_file.write(&magic_header).unwrap();
      out_file.write(&ciphertext).unwrap();
      out_file.flush().unwrap();
 
