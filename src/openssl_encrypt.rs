@@ -12,6 +12,7 @@ pub struct OpensslEncrypt {
     pub key: Vec<u8>,
     pub iv: Vec<u8>,
     pub salt: Vec<u8>,
+    pub iteration_count: u32,
 }
 
 impl Default for OpensslEncrypt {
@@ -21,6 +22,7 @@ impl Default for OpensslEncrypt {
             salt: OpensslEncrypt::get_random_bytes(8),
             iv: vec![0; 0],
             key: vec![0; 0],
+            iteration_count: 10000,
         }
     }
 }
@@ -34,7 +36,7 @@ impl OpensslEncrypt {
     pub fn encrypt(mut self, chunk: Vec<u8>) -> Vec<u8> {
         if self.key.len() == 0 {
             println!("key doesnt exist creating values...");
-            let iterations = NonZeroU32::new(10000).unwrap();
+            let iterations = NonZeroU32::new(self.iteration_count).unwrap();
             let mut pbkdf2_key_iv = [0; 48]; // 256 bits + 128 bits
             
             pbkdf2::derive(PBKDF2_ALG, iterations,  &self.salt, &self.password, &mut pbkdf2_key_iv);
@@ -63,5 +65,30 @@ impl OpensslEncrypt {
         ciphertext.truncate(count);
 
         return [&magic_header[..], &ciphertext[..]].concat();
+    }
+
+    pub fn decrypt(mut self, chunk: Vec<u8>) -> Vec<u8> {
+        /*// Let's pretend we don't know the plaintext, and now decrypt the ciphertext.
+        let data_len = ciphertext.len();
+        let ciphertexts = [&ciphertext[..9], &ciphertext[9..]];
+
+        // Create a cipher context for decryption.
+        let mut decrypter = Crypter::new(
+            Cipher::aes_128_cbc(),
+            Mode::Decrypt,
+            key,
+            Some(iv)).unwrap();
+        let mut plaintext = vec![0; data_len + block_size];
+
+        // Decrypt 2 chunks of ciphertexts successively.
+        let mut count = decrypter.update(ciphertexts[0], &mut plaintext).unwrap();
+        count += decrypter.update(ciphertexts[1], &mut plaintext[count..]).unwrap();
+        count += decrypter.finalize(&mut plaintext[count..]).unwrap();
+        plaintext.truncate(count);
+
+        let mut out_file = File::create("out.txt").unwrap();
+        out_file.write(&plaintext).unwrap();
+        out_file.flush().unwrap();
+        //assert_eq!(b"Some Stream of Crypto Text", &plaintext[..]);*/
     }
 }
