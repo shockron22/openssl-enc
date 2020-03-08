@@ -3,6 +3,8 @@ use std::fs::File;
 
 mod openssl_encrypt;
 
+use openssl_encrypt::OpensslEncrypt;
+
 static ONE_KB: usize = 1024;
 
 fn main() {
@@ -20,14 +22,10 @@ fn main() {
 
     let mut out_file = File::create("out.enc").unwrap();
 
-      file.read_exact(&mut file_chunk_buf).unwrap();
+      file.read_exact(&mut file_chunk_buf).unwrap(); // will not work if file is too small. TODO
 
       // encrypt here
-
-        let openssl_encrypt = openssl_encrypt::OpensslEncrypt { 
-          password: "password".as_bytes().to_vec(),
-          ..Default::default() 
-        };
+        let openssl_encrypt = OpensslEncrypt::new("password".to_string(), 10000);
 
         let out_text: Vec<u8> = openssl_encrypt.encrypt(file_chunk_buf);
      //   println!("{:?}", out_text.iter());
