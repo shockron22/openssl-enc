@@ -22,6 +22,7 @@ trait GetRandomBytes {
     }
 }
 
+#[cfg(not(test))]
 impl GetRandomBytes for OpensslEncrypt {}
 
 impl OpensslEncrypt {
@@ -70,14 +71,13 @@ impl OpensslEncrypt {
     }
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     // mock/override default get_random_bytes to return static value
-    impl super::GetRandomBytesTest for OpensslEncrypt {
+    #[cfg(test)]
+    impl super::GetRandomBytes for OpensslEncrypt {
         fn get_random_bytes(length: usize) -> Vec<u8> {
             return b"\x53\x61\x23\x11\x23\x56\x74\x12\x34\x12\x23\x23\x23\x23\x54"[..length].to_vec();
         }
