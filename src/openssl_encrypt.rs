@@ -1,4 +1,4 @@
-use openssl::symm::{encrypt, decrypt, Cipher};
+use openssl::symm::{encrypt, decrypt, Cipher, Crypter, Mode};
 
 use openssl::rand::rand_bytes;
 
@@ -12,6 +12,10 @@ pub struct OpensslEncrypt {
     iv: Vec<u8>,
     magic_header: Vec<u8>,
     cipher: Cipher,
+    block_size: usize,
+    encrypted_length: usize,
+    encrypter: openssl::symm::Crypter,
+    add_magic_header: bool,
 }
 
 trait GetRandomBytes {
@@ -42,14 +46,23 @@ impl OpensslEncrypt {
     pub fn new(password: String, cipher: Cipher, iteration_count: u32) -> OpensslEncrypt {
         let (key, iv, salt) = OpensslEncrypt::get_iv_salt_key(password, iteration_count);
 
-        // let block_size = cipher.block_size();
+        let block_size = cipher.block_size();
         let magic_header = ["Salted__".as_bytes(), &salt].concat();
+        let encrypter = Crypter::new(
+            cipher,
+            Mode::Encrypt,
+            &key,
+            Some(&iv)).unwrap();
 
         return OpensslEncrypt {
             key, 
             iv,
             magic_header,
             cipher, 
+            block_size,
+            encrypted_length: 0,
+            encrypter,
+            add_magic_header: true
         };
     }
     pub fn encrypt(&mut self, data: Vec<u8>) -> Vec<u8> {
@@ -61,13 +74,36 @@ impl OpensslEncrypt {
         
         return [&self.magic_header[..], &ciphertext[..]].concat();
     }
+    pub fn encrypt_chunk(&mut self, chunk: &Vec<u8>) -> Vec<u8> {
+        let mut ciphertext = vec![0; chunk.len() + self.block_size];
+
+        let count = self.encrypter.update(&chunk, &mut ciphertext).unwrap();
+        self.encrypted_length += count;
+
+        if self.add_magic_header {
+            self.add_magic_header = false;
+            return [&self.magic_header[..], &ciphertext[..]].concat();
+        } else {
+            return ciphertext;
+        }
+    }
+    pub fn finalize_chunks(&mut self) -> Vec<u8> {
+        // this is going to be huge/a memory leak potentially. I need to see what the max size from finalize is
+        let mut ciphertext = vec![0; self.encrypted_length];
+        println!("{}", self.encrypted_length);
+        let final_length = self.encrypter.finalize(&mut ciphertext).unwrap();
+        ciphertext.truncate(final_length);
+        return ciphertext;
+    }
     pub fn decrypt(&mut self, data: Vec<u8>) -> Vec<u8> {
         let data_without_magic_header = &data[16..];
-        return decrypt(
+        let decrypted_data = decrypt(
             self.cipher,
             &self.key,
             Some(&self.iv),
             &data_without_magic_header).unwrap();
+        // println!("{:X?}", data);
+        return decrypted_data;
     }
 }
 
@@ -75,7 +111,7 @@ impl OpensslEncrypt {
 mod tests {
     use super::*;
 
-    // mock/override default get_random_bytes to return static value
+    // implement test version of get_random_bytes that returns static value
     #[cfg(test)]
     impl super::GetRandomBytes for OpensslEncrypt {
         fn get_random_bytes(length: usize) -> Vec<u8> {
