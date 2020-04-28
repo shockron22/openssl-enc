@@ -78,10 +78,16 @@ impl OpensslEncrypt {
         let mut ciphertext = vec![0; chunk.len() + self.block_size];
 
         let count = self.encrypter.update(&chunk, &mut ciphertext).unwrap();
+        ciphertext.truncate(count);
         self.encrypted_length += count;
 
         if self.add_magic_header {
             self.add_magic_header = false;
+            println!("setting magic header to false");
+            println!("{:?}", self.block_size);
+            println!("{:?}", count);
+            println!("{:?}", chunk.len());
+            println!("{:?}", ciphertext.len());
             return [&self.magic_header[..], &ciphertext[..]].concat();
         } else {
             return ciphertext;
