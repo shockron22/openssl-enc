@@ -1,9 +1,6 @@
 use std::io::prelude::*;
 use std::fs::File;
 
-// todo bad characters in file. 
-// try decrypt of whole file after encrypt.
-
 mod openssl_encrypt;
 
 use openssl_encrypt::OpensslEncrypt;
@@ -39,7 +36,7 @@ fn main() {
       out_file.write(&encrypted_data).unwrap();
     }
     println!("finalize");
-    let final_data = openssl_enc.finalize_chunks();
+    let final_data = openssl_enc.encrypter_finalize();
     out_file.write(&final_data).unwrap();
     out_file.flush().unwrap();
 
