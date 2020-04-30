@@ -26,3 +26,9 @@ impl From<&str> for OpensslEncError {
         }
     }
 }
+
+impl OpensslEncError {
+    pub fn new(msg: &str) -> OpensslEncError {
+        OpensslEncError{message: msg.to_string()}
+    }
+}

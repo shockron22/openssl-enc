@@ -58,8 +58,8 @@ pub struct OpensslEnc {
     magic_header: Vec<u8>,
     cipher: Cipher,
     block_size: usize,
-    encrypter: openssl::symm::Crypter,
-    decrypter: openssl::symm::Crypter,
+    encrypter: Option<openssl::symm::Crypter>,
+    decrypter: Option<openssl::symm::Crypter>,
     add_magic_header: bool,
     remove_magic_header: bool,
 }
@@ -97,18 +97,6 @@ impl OpensslEnc {
 
         let key = pbkdf2_key_iv[0..key_length].to_vec();
         let iv = pbkdf2_key_iv[key_length..key_and_iv_length].to_vec();
-        
-        let encrypter = Crypter::new(
-            cipher,
-            Mode::Encrypt,
-            &key,
-            Some(&iv))?;
-
-        let decrypter = Crypter::new(
-            cipher,
-            Mode::Decrypt,
-            &key,
-            Some(&iv))?;
 
         return Ok(OpensslEnc {
             key, 
@@ -116,8 +104,8 @@ impl OpensslEnc {
             magic_header: ["Salted__".as_bytes(), &salt].concat(),
             cipher, 
             block_size: cipher.block_size(),
-            encrypter,
-            decrypter,
+            encrypter: None,
+            decrypter: None,
             add_magic_header: true,
             remove_magic_header: true,
         });
@@ -130,13 +118,13 @@ impl OpensslEnc {
     ///  use openssl_enc::OpensslEnc;
     /// 
     ///  let mut openssl_encrypt = OpensslEnc::new("password".to_string(), Cipher::aes_256_cbc(), 10000).unwrap();
-    ///  let encrypted_data = openssl_encrypt.encrypt("some data".as_bytes().to_vec()).unwrap();
+    ///  let encrypted_data = openssl_encrypt.encrypt(&"some data".as_bytes().to_vec()).unwrap();
     ///  assert_eq!(
     ///      b"\x53\x61\x6c\x74\x65\x64\x5f\x5f\x53\x61\x23\x11\x23\x56\x74\x12\x72\x30\x32\x8f\xca\x92\x3c\x3b\x53\x99\x11\x99\x14\x32\x79\x78".to_vec(),
     ///      encrypted_data
     ///  );
     /// ```
-    pub fn encrypt(&mut self, data: Vec<u8>) -> Result<Vec<u8>, OpensslEncError> {
+    pub fn encrypt(&mut self, data: &Vec<u8>) -> Result<Vec<u8>, OpensslEncError> {
         let ciphertext = encrypt(
             self.cipher,
             &self.key,
@@ -163,9 +151,23 @@ impl OpensslEnc {
     ///   );
     /// ```
     pub fn encrypt_chunk(&mut self, chunk: &Vec<u8>) -> Result<Vec<u8>, OpensslEncError> {
+        if self.add_magic_header {
+            self.encrypter = Some(Crypter::new(
+                self.cipher,
+                Mode::Encrypt,
+                &self.key,
+                Some(&self.iv))?);
+        }
         let mut ciphertext = vec![0; chunk.len() + self.block_size];
 
-        let count = self.encrypter.update(&chunk, &mut ciphertext)?;
+        let encrypter = match self.encrypter.as_mut() {
+            Some(encrypter) => encrypter,
+            None => { 
+                let no_encrypter_error = OpensslEncError::new("could not get encrypter");
+                return Err(no_encrypter_error);
+            },
+        };
+        let count = encrypter.update(&chunk, &mut ciphertext)?;
         ciphertext.truncate(count);
 
         if self.add_magic_header {
@@ -180,7 +182,14 @@ impl OpensslEnc {
     pub fn encrypter_finalize(&mut self) -> Result<Vec<u8>, OpensslEncError> {
         self.add_magic_header = true;
         let mut ciphertext = vec![0; self.block_size];
-        let final_length = self.encrypter.finalize(&mut ciphertext)?;
+        let encrypter = match self.encrypter.as_mut() {
+            Some(encrypter) => encrypter,
+            None => { 
+                let no_encrypter_error = OpensslEncError::new("could not get encrypter");
+                return Err(no_encrypter_error);
+            },
+        };
+        let final_length = encrypter.finalize(&mut ciphertext)?;
         ciphertext.truncate(final_length);
         return Ok(ciphertext);
     }
@@ -193,10 +202,10 @@ impl OpensslEnc {
     /// 
     ///   let mut openssl_encrypt = OpensslEnc::new("password".to_string(), Cipher::aes_256_cbc(), 10000).unwrap();
     ///   let encrypted_data = b"\x53\x61\x6c\x74\x65\x64\x5f\x5f\x53\x61\x23\x11\x23\x56\x74\x12\x72\x30\x32\x8f\xca\x92\x3c\x3b\x53\x99\x11\x99\x14\x32\x79\x78".to_vec();
-    ///   let decrypted_data = openssl_encrypt.decrypt(encrypted_data).unwrap();
+    ///   let decrypted_data = openssl_encrypt.decrypt(&encrypted_data).unwrap();
     ///   assert_eq!(b"some data", &decrypted_data[..]);
     /// ```
-    pub fn decrypt(&mut self, data: Vec<u8>) -> Result<Vec<u8>, OpensslEncError> {
+    pub fn decrypt(&mut self, data: &Vec<u8>) -> Result<Vec<u8>, OpensslEncError> {
         let data_without_magic_header = &data[16..];
         let decrypted_data = decrypt(
             self.cipher,
@@ -225,6 +234,12 @@ impl OpensslEnc {
     pub fn decrypt_chunk(&mut self, chunk: &Vec<u8>) -> Result<Vec<u8>, OpensslEncError> {
         let reformatted_data;
         if self.remove_magic_header {
+            self.decrypter = Some(Crypter::new(
+                self.cipher,
+                Mode::Decrypt,
+                &self.key,
+                Some(&self.iv))?
+            );
             self.remove_magic_header = false;
             reformatted_data = &chunk[16..];
         } else {
@@ -233,7 +248,14 @@ impl OpensslEnc {
 
         let mut plain_text = vec![0; reformatted_data.len() + self.block_size];
 
-        let count = self.decrypter.update(&reformatted_data, &mut plain_text)?;
+        let decrypter = match self.decrypter.as_mut() {
+            Some(decrypter) => decrypter,
+            None => { 
+                let no_decrypter_error = OpensslEncError::new("could not get decrypter");
+                return Err(no_decrypter_error);
+            },
+        };
+        let count = decrypter.update(&reformatted_data, &mut plain_text)?;
         plain_text.truncate(count);
 
         return Ok(plain_text);
@@ -243,7 +265,14 @@ impl OpensslEnc {
     pub fn decrypter_finalize(&mut self) -> Result<Vec<u8>, OpensslEncError> {
         self.remove_magic_header = true;
         let mut ciphertext = vec![0; self.block_size];
-        let final_length = self.decrypter.finalize(&mut ciphertext)?;
+        let decrypter = match self.decrypter.as_mut() {
+            Some(decrypter) => decrypter,
+            None => { 
+                let no_decrypter_error = OpensslEncError::new("could not get decrypter");
+                return Err(no_decrypter_error);
+            },
+        };
+        let final_length = decrypter.finalize(&mut ciphertext)?;
         ciphertext.truncate(final_length);
         return Ok(ciphertext);
     }
@@ -264,7 +293,7 @@ mod tests {
     #[test]
     fn can_encrypt_correctly() {
         let mut openssl_encrypt = OpensslEnc::new("password".to_string(), Cipher::aes_256_cbc(), 10000).unwrap();
-        let encrypted_data = openssl_encrypt.encrypt("some data".as_bytes().to_vec()).unwrap();
+        let encrypted_data = openssl_encrypt.encrypt(&"some data".as_bytes().to_vec()).unwrap();
         assert_eq!(
             b"\x53\x61\x6c\x74\x65\x64\x5f\x5f\x53\x61\x23\x11\x23\x56\x74\x12\x72\x30\x32\x8f\xca\x92\x3c\x3b\x53\x99\x11\x99\x14\x32\x79\x78".to_vec(),
             encrypted_data
@@ -273,8 +302,7 @@ mod tests {
     #[test]
     fn can_encrypt_128_correctly() {
         let mut openssl_encrypt = OpensslEnc::new("password".to_string(), Cipher::aes_128_cbc(), 10000).unwrap();
-        let encrypted_data = openssl_encrypt.encrypt("some data".as_bytes().to_vec()).unwrap();
-        // println!("{:X?}", encrypted_data);
+        let encrypted_data = openssl_encrypt.encrypt(&"some data".as_bytes().to_vec()).unwrap();
         assert_eq!(
             b"\x53\x61\x6C\x74\x65\x64\x5F\x5F\x53\x61\x23\x11\x23\x56\x74\x12\x68\x4B\xA4\xA2\x6F\xB6\x96\x91\x11\x64\x32\x21\xF9\x2A\xAB\x92".to_vec(),
             encrypted_data
@@ -293,10 +321,32 @@ mod tests {
         );
     }
     #[test]
+    fn can_encrypt_and_decrypt_chunks_correctly() {
+        let mut openssl_encrypt = OpensslEnc::new("password".to_string(), Cipher::aes_256_cbc(), 10000).unwrap();
+        let encrypted_chunk1 = openssl_encrypt.encrypt_chunk(&"some".as_bytes().to_vec()).unwrap();
+        let encrypted_chunk2 = openssl_encrypt.encrypt_chunk(&" ".as_bytes().to_vec()).unwrap();
+        let encrypted_chunk3 = openssl_encrypt.encrypt_chunk(&"data".as_bytes().to_vec()).unwrap();
+        let encrypted_final_chunk = openssl_encrypt.encrypter_finalize().unwrap();
+        let encrypted_data = [&encrypted_chunk1[..], &encrypted_chunk2[..], &encrypted_chunk3[..], &encrypted_final_chunk[..]].concat();
+        let decrypted_data = openssl_encrypt.decrypt(&encrypted_data).unwrap();
+        assert_eq!(b"some data", &decrypted_data[..]);
+        assert_eq!(
+            b"\x53\x61\x6c\x74\x65\x64\x5f\x5f\x53\x61\x23\x11\x23\x56\x74\x12\x72\x30\x32\x8f\xca\x92\x3c\x3b\x53\x99\x11\x99\x14\x32\x79\x78".to_vec(),
+            encrypted_data
+        );
+    }
+    #[test]
+    fn can_encrypt_and_decrypt_correctly() {
+        let mut openssl_encrypt = OpensslEnc::new("password".to_string(), Cipher::aes_256_cbc(), 10000).unwrap();
+        let encrypted_data = openssl_encrypt.encrypt(&"some data".as_bytes().to_vec()).unwrap();
+        let decrypted_data = openssl_encrypt.decrypt(&encrypted_data).unwrap();
+        assert_eq!(b"some data", &decrypted_data[..]);
+    }
+    #[test]
     fn can_decrypt_correctly() {
         let mut openssl_encrypt = OpensslEnc::new("password".to_string(), Cipher::aes_256_cbc(), 10000).unwrap();
         let encrypted_data = b"\x53\x61\x6c\x74\x65\x64\x5f\x5f\x53\x61\x23\x11\x23\x56\x74\x12\x72\x30\x32\x8f\xca\x92\x3c\x3b\x53\x99\x11\x99\x14\x32\x79\x78".to_vec();
-        let decrypted_data = openssl_encrypt.decrypt(encrypted_data).unwrap();
+        let decrypted_data = openssl_encrypt.decrypt(&encrypted_data).unwrap();
 
         assert_eq!(b"some data", &decrypted_data[..]);
     }
@@ -304,7 +354,7 @@ mod tests {
     fn can_decrypt_128_correctly() {
         let mut openssl_encrypt = OpensslEnc::new("password".to_string(), Cipher::aes_128_cbc(), 10000).unwrap();
         let encrypted_data = b"\x53\x61\x6C\x74\x65\x64\x5F\x5F\x53\x61\x23\x11\x23\x56\x74\x12\x68\x4B\xA4\xA2\x6F\xB6\x96\x91\x11\x64\x32\x21\xF9\x2A\xAB\x92".to_vec();
-        let decrypted_data = openssl_encrypt.decrypt(encrypted_data).unwrap();
+        let decrypted_data = openssl_encrypt.decrypt(&encrypted_data).unwrap();
 
         assert_eq!(b"some data", &decrypted_data[..]);
     }
