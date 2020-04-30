@@ -8,7 +8,7 @@ description = "An Implementation of openssl enc functionality"
 homepage = "https://github.com/shockron22/openssl_enc"
 repository = "https://github.com/shockron22/openssl_enc"
 readme = "README.md"
-keywords = ["openssl", "encryption", "decryption", "openssl enc"]
+keywords = ["openssl", "encryption", "decryption", "enc"]
 categories = ["cryptography", "encoding"]
 
 
